@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { createContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
 
 // ---- Backend API (axios) ----
@@ -14,7 +14,7 @@ import {
   getCategories,
   getMyReviewsApi,
   getProductApi,
-  getProducts, // ✅ added
+  getProducts,
   getToken,
   isValidGcash,
   setUser as persistUser,
@@ -40,8 +40,6 @@ export default function AppProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [productDetail, setProductDetail] = useState(null);
   const [myReviews, setMyReviews] = useState([]);
-
-
 
   // categories map {id: name}
   const [categoryMap, setCategoryMap] = useState({});
@@ -95,25 +93,35 @@ export default function AppProvider({ children }) {
   }, []);
 
   // refresh backend data for authed user
-  const refreshAuthedData = async (u = user) => {
-    if (!u) return;
-    const id = u?._id || u?.id || u?.email;
-    if (!id) return;
+const refreshAuthedData = useCallback(async (u = user) => {
+  if (!u) return;
+  const id = u?._id || u?.id || u?.email;
+  if (!id) return;
 
-    try {
-      const cartResp = await apiGetCart(id);
-      setCart(Array.isArray(cartResp?.data?.items) ? cartResp.data.items : []);
-    } catch {
+  try {
+    const [cartResp, ordersResp] = await Promise.allSettled([
+      apiGetCart(id),
+      apiGetOrders(id),
+    ]);
+
+    if (cartResp.status === "fulfilled") {
+      const items = cartResp.value?.data?.items;
+      setCart(Array.isArray(items) ? items : []);
+    } else {
       setCart([]);
     }
 
-    try {
-      const ordersResp = await apiGetOrders(id);
-      setOrders(Array.isArray(ordersResp?.data) ? ordersResp.data : []);
-    } catch {
+    if (ordersResp.status === "fulfilled") {
+      const data = ordersResp.value?.data;
+      setOrders(Array.isArray(data) ? data : []);
+    } else {
       setOrders([]);
     }
-  };
+  } catch {
+    setCart([]);
+    setOrders([]);
+  }
+}, [user]);
 
   // guard: block guests from protected actions
   const ensureAuthed = () => {
@@ -124,7 +132,21 @@ export default function AppProvider({ children }) {
     return true;
   };
 
-  // cart actions
+  // ---- cart persistence helper ----
+  const persistCart = async (items) => {
+    try {
+      if (isLoggedIn) {
+        await setCartApi({ userId, items });
+      } else {
+        await saveCart({ items, total: 0 });
+      }
+    } catch (e) {
+      console.warn("persist cart failed:", e?.message);
+    }
+  };
+
+  // ---------------- CART ACTIONS ----------------
+
   const handleAddToCart = async (product) => {
     const idx = cart.findIndex((i) => i.productId === product._id);
     const updated =
@@ -142,44 +164,55 @@ export default function AppProvider({ children }) {
           ];
 
     setCart(updated);
-
-    try {
-      if (isLoggedIn) {
-        await setCartApi({ userId, items: updated }); // backend
-      } else {
-        await saveCart({ items: updated, total: 0 }); // guest local
-      }
-      setLastAddedCategory(product?.category ?? "Uncategorized");
-    } catch (e) {
-      console.error("save cart failed:", e?.message);
-    }
+    persistCart(updated);
+    setLastAddedCategory(product?.category ?? "Uncategorized");
   };
 
-  const handleRemoveFromCart = async (productId) => {
+  // Set absolute qty; removes line if qty <= 0
+  const setQty = async (productId, qty) => {
+    const nextQty = Math.max(0, Number(qty) || 0);
+    const updated = cart
+      .map((i) => (i.productId === productId ? { ...i, quantity: nextQty } : i))
+      .filter((i) => Number(i.quantity || 0) > 0);
+
+    setCart(updated);
+    persistCart(updated);
+  };
+
+  const incrementCartQty = (productId) => {
+    const current = cart.find((i) => i.productId === productId)?.quantity || 0;
+    return setQty(productId, Number(current) + 1);
+  };
+
+  const decrementCartQty = (productId) => {
+    const current = cart.find((i) => i.productId === productId)?.quantity || 0;
+    return setQty(productId, Number(current) - 1);
+  };
+
+  // ⚠️ now removes ONE at a time; deletes line only when it hits 0
+  const handleRemoveFromCart = (productId) => {
+    return decrementCartQty(productId);
+  };
+
+  // Explicit full delete (trash button)
+  const handleRemoveLine = async (productId) => {
     const updated = cart.filter((i) => i.productId !== productId);
     setCart(updated);
-
-    try {
-      if (isLoggedIn) {
-        await setCartApi({ userId, items: updated });
-      } else {
-        await saveCart({ items: updated, total: 0 });
-      }
-    } catch (e) {
-      console.error("remove from cart failed:", e?.message);
-    }
+    persistCart(updated);
   };
 
-  // place order
+// place order
   const handlePlaceOrder = async () => {
-    if (!ensureAuthed()) return;
-    if (!deliveryAddress) return;
-    if (paymentMethod === "GCash" && !isValidGcash(gcashNumber)) return;
+    if (!ensureAuthed()) return { success: false, message: "Not logged in" };
+    if (!deliveryAddress) return { success: false, message: "Delivery address is required" };
+    if (paymentMethod === "GCash" && !isValidGcash(gcashNumber)) {
+      return { success: false, message: "Invalid GCash number" };
+    }
 
-    const total = cart.reduce(
-      (s, it) => s + Number(it.price || 0) * Number(it.quantity || 0),
-      0
-    );
+    const total = cart.reduce((s, it) => s + Number(it.price || 0) * Number(it.quantity || 0), 0);
+    if (!Array.isArray(cart) || cart.length === 0 || total <= 0) {
+      return { success: false, message: "Your cart is empty." };
+    }
 
     const payload = {
       userId,
@@ -192,31 +225,40 @@ export default function AppProvider({ children }) {
     };
 
     try {
-      await apiCreateOrder(payload);
-      await refreshAuthedData(user);
+      const resp = await apiCreateOrder(payload);
+      const order = resp?.data || null;
 
+      // ✅ optimistic: show new order immediately
+      setOrders((prev) => (order ? [order, ...(prev || [])] : (prev || [])));
+
+      // clear checkout + cart
+      setCart([]);
       setDeliveryAddress("");
       setGcashNumber("");
 
-      router.push("/tabs/orders");
+      // ✅ kick off a refresh, but DO NOT await (non-blocking)
+      refreshAuthedData(user);
+
+      return { success: true, order };
     } catch (e) {
       console.error("place order failed:", e?.message);
+      return { success: false, message: e?.message || "Order failed" };
     }
   };
 
-  // merge guest cart on login/register
-  const mergeGuestCartInto = async (u) => {
-    const guestCart = await loadCart();
-    if (guestCart?.items?.length > 0) {
-      try {
-        await setCartApi({ userId: u._id || u.id || u.email, items: guestCart.items });
-        await clearCart();
-        Alert.alert("Cart Saved", "Your guest cart has been saved to your account.");
-      } catch (e) {
-        console.warn("merge guest cart failed:", e?.message);
+    // merge guest cart on login/register
+    const mergeGuestCartInto = async (u) => {
+      const guestCart = await loadCart();
+      if (guestCart?.items?.length > 0) {
+        try {
+          await setCartApi({ userId: u._id || u.id || u.email, items: guestCart.items });
+          await clearCart();
+          Alert.alert("Cart Saved", "Your guest cart has been saved to your account.");
+        } catch (e) {
+          console.warn("merge guest cart failed:", e?.message);
+        }
       }
-    }
-  };
+    };
 
   // auth actions
   const doLogin = async ({ email, password }) => {
@@ -291,42 +333,43 @@ export default function AppProvider({ children }) {
   );
 
   // Fetch single product with reviews
-const fetchProductDetail = async (id) => {
-  try {
-    const res = await getProductApi(id);
-    setProductDetail(res.data);
-  } catch (e) {
-    console.warn("fetchProductDetail failed:", e.message);
-  }
-};
+  const fetchProductDetail = async (id) => {
+    try {
+      const res = await getProductApi(id);
+      setProductDetail(res.data);
+    } catch (e) {
+      console.warn("fetchProductDetail failed:", e.message);
+    }
+  };
 
-// Submit review
-const submitReview = async (productId, rating, comment, imageUrls = []) => {
-  try {
-    const token = await getToken();
-    const res = await addReviewApi(productId, { rating, comment, imageUrls }, token);
-    setProductDetail(res.data);
-  } catch (e) {
-    console.warn("submitReview failed:", e.message);
-  }
-};
+  // Submit review
+  const submitReview = async (productId, rating, comment, imageUrls = []) => {
+    try {
+      const token = await getToken();
+      const res = await addReviewApi(productId, { rating, comment, imageUrls }, token);
+      setProductDetail(res.data);
+    } catch (e) {
+      console.warn("submitReview failed:", e.message);
+    }
+  };
 
-const fetchMyReviews = async () => {
-  try {
-    const token = await getToken();
-    if (!token) return;
-    const res = await getMyReviewsApi(token);
-    setMyReviews(res.data || []);
-  } catch (e) {
-    console.warn("fetchMyReviews failed:", e.message);
-  }
-};
+  const fetchMyReviews = async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await getMyReviewsApi(token);
+      setMyReviews(res.data || []);
+    } catch (e) {
+      console.warn("fetchMyReviews failed:", e.message);
+    }
+  };
 
   const value = {
     // state
     loading,
     products,
     cart,
+    setCart, // ← expose so screens can optimistically adjust if ever needed
     orders,
     user,
     selectedCategory,
@@ -352,16 +395,21 @@ const fetchMyReviews = async () => {
     // actions
     ensureAuthed,
     handleAddToCart,
-    handleRemoveFromCart,
+    handleRemoveFromCart, // now removes one
+    handleRemoveLine,     // full delete
+    incrementCartQty,
+    decrementCartQty,
+    setQty,
     handlePlaceOrder,
     handleLogout,
     doLogin,
     doRegister,
-    
+    refreshAuthedData, 
+
+    // product & reviews
     productDetail,
     fetchProductDetail,
     submitReview,
-    
     myReviews,
     fetchMyReviews,
 
