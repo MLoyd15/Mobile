@@ -1,4 +1,5 @@
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,7 +14,6 @@ import {
   View,
 } from "react-native";
 import { AppCtx } from "../context/AppContext";
-
 const GREEN = "#10B981";
 const GREEN_BG = "#ECFDF5";     // light green background
 const GREEN_BORDER = "#A7F3D0"; // light green border
@@ -23,6 +23,7 @@ const BORDER = "#E5E7EB";
 const BLUE = "#3B82F6";
 
 export default function OrdersScreen() {
+  const router = useRouter();
   const {
     cart,
     cartTotal,
@@ -84,21 +85,30 @@ export default function OrdersScreen() {
     !!gcashError ||
     placing;
 
-  const onPlace = async () => {
-    if (disabled) return;
-    setPlacing(true);
-    try {
-      const res = await handlePlaceOrder();
-      if (res?.success) {
-        const shortId = String(res.order?._id || res.order?.id || "").slice(-6).toUpperCase();
-        showToast(`Order #${shortId} placed! ✅`);
-      } else {
-        Alert.alert("Order failed", res?.message || "Please try again.");
-      }
-    } finally {
-      setPlacing(false);
+  
+const onPlace = async () => {
+  if (disabled) return;
+  setPlacing(true);
+  try {
+    const res = await handlePlaceOrder();
+    if (res?.success) {
+      const orderId = res.order?._id || res.order?.id;
+      const shortId = String(orderId || "").slice(-6).toUpperCase();
+      showToast(`Order #${shortId} placed! ✅`);
+
+    // 👉 Navigate to Deliveries page and focus this order
+     if (orderId) {
+       router.push({ pathname: "/deliveries", params: { orderId } });
+     } else {
+     router.push("/deliveries");
     }
-  };
+    } else {
+      Alert.alert("Order failed", res?.message || "Please try again.");
+    }
+  } finally {
+    setPlacing(false);
+  }
+};
 
   return (
     <KeyboardAvoidingView

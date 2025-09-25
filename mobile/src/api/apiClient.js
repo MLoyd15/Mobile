@@ -3,6 +3,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { Platform } from "react-native";
 
+// Keep this near the top of apiClient.js, after imports
+axios.interceptors.request.use(async (config) => {
+  try {
+    // If header already set (e.g., after login), keep it
+    if (!config.headers?.Authorization) {
+      const t = await AsyncStorage.getItem("pos-token");
+      if (t) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${t}`;
+      }
+    }
+  } catch {}
+  return config;
+});
+
 /**
  * Base URL selection
  * - Prefer EXPO_PUBLIC_API_URL (e.g. http://192.168.1.23:5000/api)
@@ -102,3 +117,10 @@ export const setCartApi = (payload) => axios.post(`${API_URL}/cart`, payload);
 /** Orders */
 export const getOrders = (userId) => axios.get(`${API_URL}/orders/${userId}`);
 export const createOrder = (payload) => axios.post(`${API_URL}/orders`, payload);
+
+// --- Deliveries (current user) ---
+export const listMyDeliveries = () => axios.get(`${API_URL}/delivery/mine`);
+export const getDeliveryForOrder = (orderId) =>
+  axios.get(`${API_URL}/delivery/by-order/${orderId}`);
+export const getDriverContact = (deliveryId) =>
+  axios.get(`${API_URL}/delivery/${deliveryId}/driver`);

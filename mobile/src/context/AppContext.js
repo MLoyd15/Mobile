@@ -202,49 +202,69 @@ const refreshAuthedData = useCallback(async (u = user) => {
   };
 
 // place order
-  const handlePlaceOrder = async () => {
-    if (!ensureAuthed()) return { success: false, message: "Not logged in" };
-    if (!deliveryAddress) return { success: false, message: "Delivery address is required" };
-    if (paymentMethod === "GCash" && !isValidGcash(gcashNumber)) {
-      return { success: false, message: "Invalid GCash number" };
-    }
+  // place order (returns { success, order?, message? })
+const handlePlaceOrder = async () => {
+  if (!ensureAuthed()) return { success: false, message: "Not logged in" };
 
-    const total = cart.reduce((s, it) => s + Number(it.price || 0) * Number(it.quantity || 0), 0);
-    if (!Array.isArray(cart) || cart.length === 0 || total <= 0) {
-      return { success: false, message: "Your cart is empty." };
-    }
+  const addr = String((deliveryAddress || "").trim());
+  if (!addr) return { success: false, message: "Delivery address is required" };
 
-    const payload = {
-      userId,
-      items: cart,
-      total,
-      address: deliveryAddress,
-      paymentMethod,
-      status: "Pending",
-      gcashNumber: paymentMethod === "GCash" ? gcashNumber.trim() : undefined,
-    };
+  if (paymentMethod === "GCash" && !isValidGcash(gcashNumber)) {
+    return { success: false, message: "Invalid GCash number" };
+  }
 
-    try {
-      const resp = await apiCreateOrder(payload);
-      const order = resp?.data || null;
+  const total = Array.isArray(cart)
+    ? cart.reduce((s, it) => s + Number(it.price || 0) * Number(it.quantity || 0), 0)
+    : 0;
 
-      // ✅ optimistic: show new order immediately
-      setOrders((prev) => (order ? [order, ...(prev || [])] : (prev || [])));
+  if (!Array.isArray(cart) || cart.length === 0 || total <= 0) {
+    return { success: false, message: "Your cart is empty." };
+  }
 
-      // clear checkout + cart
-      setCart([]);
-      setDeliveryAddress("");
-      setGcashNumber("");
+  // If you don't have a UI for this yet, default to "in-house"
+  const deliveryType = "in-house"; // or "pickup" / "third-party" if you later add a selector
 
-      // ✅ kick off a refresh, but DO NOT await (non-blocking)
-      refreshAuthedData(user);
-
-      return { success: true, order };
-    } catch (e) {
-      console.error("place order failed:", e?.message);
-      return { success: false, message: e?.message || "Order failed" };
-    }
+  const payload = {
+    userId,
+    items: cart,
+    total,
+    address: addr,
+    paymentMethod,
+    status: "Pending",
+    deliveryType, // <-- ensure DeliveryController can create the delivery with a type
+    gcashNumber: paymentMethod === "GCash" ? String(gcashNumber || "").trim() : undefined,
   };
+
+  try {
+    const resp = await apiCreateOrder(payload);
+
+    // Normalize created order from axios/fetch shapes
+    const order =
+      resp?.data?._id ? resp.data :
+      resp?.data?.order ? resp.data.order :
+      resp?._id ? resp : null;
+
+    if (!order?._id) {
+      return { success: false, message: "Order creation failed." };
+    }
+
+    // ✅ optimistic: prepend new order to list
+    setOrders(prev => (order ? [order, ...(prev || [])] : (prev || [])));
+
+    // clear checkout + cart
+    setCart([]);
+    setDeliveryAddress("");
+    setGcashNumber("");
+
+    // fire-and-forget refresh
+    refreshAuthedData?.(user);
+
+    return { success: true, order };
+  } catch (e) {
+    console.error("place order failed:", e?.message);
+    return { success: false, message: e?.response?.data?.message || e?.message || "Order failed" };
+  }
+};
 
     // merge guest cart on login/register
     const mergeGuestCartInto = async (u) => {
