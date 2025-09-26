@@ -96,12 +96,12 @@ export default function ProfileScreen() {
         <ProfileButton
           title="Edit Profile"
           icon="person-outline"
-          onPress={() => router.push("/editProfile")}
+          onPress={() => router.push("/edit-profile")}
         />
         <ProfileButton
           title="Manage Addresses"
           icon="location-outline"
-          onPress={() => router.push("/addresses")}
+          onPress={() => router.push("/(modal)/addresses")}
         />
         <ProfileButton
           title="Order History"

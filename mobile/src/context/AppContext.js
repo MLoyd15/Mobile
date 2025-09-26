@@ -437,6 +437,9 @@ const handlePlaceOrder = async () => {
     categoryMap,
     categoryLabelOf,
     toAbsoluteUrl,
+
+    setUserState,    // expose the state setter for EditProfile
+    persistUser,     // expose the persist function (renamed setUser from apiClient)
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
