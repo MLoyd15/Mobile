@@ -26,6 +26,11 @@ export default function CartScreen({ navigation }) {
     else router.replace("/tabs/home");
   };
 
+  const goToCheckout = () => {
+    // Navigate to the new checkout screen
+    router.push("/checkout");
+  };
+
   const renderItem = ({ item }) => {
     const qty = Number(item.quantity || 0);
     const price = Number(item.price || 0);
@@ -130,13 +135,7 @@ export default function CartScreen({ navigation }) {
 
           <TouchableOpacity
             style={s.checkoutBtn}
-            onPress={() => {
-              if (navigation?.navigate) {
-                navigation.navigate("orders", { openCheckout: true });
-              } else {
-                router.push("/tabs/orders");
-              }
-            }}
+            onPress={goToCheckout}
           >
             <Text style={s.checkoutTxt}>Checkout</Text>
           </TouchableOpacity>
@@ -152,7 +151,7 @@ const s = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 20, // ⬅️ more breathing room on sides
+    paddingHorizontal: 20,
     paddingTop: 8,
   },
 
@@ -187,7 +186,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     paddingVertical: 14,
-    paddingHorizontal: 4, // ⬅️ adds spacing inside row
+    paddingHorizontal: 4,
     gap: 8,
   },
   thumb: { width: 64, height: 64, borderRadius: 8, backgroundColor: "#F3F4F6" },
@@ -223,14 +222,14 @@ const s = StyleSheet.create({
     height: 1,
     backgroundColor: "#E5E7EB",
     marginTop: 12,
-    marginHorizontal: 4, // ⬅️ inset divider
+    marginHorizontal: 4,
   },
 
   // footer
   footerCard: {
     paddingTop: 16,
     paddingBottom: 20,
-    paddingHorizontal: 4, // ⬅️ aligns with row content
+    paddingHorizontal: 4,
   },
   subRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   subLabel: { fontSize: 16, fontWeight: "800", color: "#111827" },
@@ -243,7 +242,7 @@ const s = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: "center",
-    marginHorizontal: 4, // ⬅️ keeps button from hitting screen edges
+    marginHorizontal: 4,
   },
   checkoutTxt: { color: "#fff", fontSize: 16, fontWeight: "800" },
 });

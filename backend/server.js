@@ -5,6 +5,8 @@ import express from "express";
 import mongoose from "mongoose";
 
 // --- route imports ---
+import "./models/Driver.js";
+import "./models/Vehicle.js";
 import authRoutes from "./routes/authRoutes.js";
 import cartRoutes from "./routes/cartRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
